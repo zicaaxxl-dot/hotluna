@@ -19,6 +19,14 @@ services:
         sync: false
       - key: HOTLUNA_API_KEY
         sync: false
+      - key: PARTNER_EMAIL
+        sync: false
+      - key: PARTNER_PASSWORD
+        sync: false
+      - key: LUNA_CLIENT_ID
+        sync: false
+      - key: LUNA_CLIENT_SECRET
+        sync: false
     disk:
       name: hotluna-data
       mountPath: /var/data

@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { dataDir, loadEnv } from "./src/env.mjs";
 import { createPixService, parsePayload } from "./src/pix.mjs";
+import { createPartner } from "./src/partner.mjs";
 import { createStore } from "./src/store.mjs";
 import { vizzionConfigured } from "./src/vizzion.mjs";
 
@@ -15,6 +16,7 @@ const publicDir = path.join(root, "public");
 const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 4173);
 const store = createStore(dataDir(root));
+const partner = createPartner(dataDir(root));
 const sessions = new Map();
 const loginAttempts = new Map();
 
@@ -24,6 +26,9 @@ const FN = {
   slug: "c4f229f13d75ea72f2966a86c15c9c3e5ac6be3b24117957861dfda2b52d0db3",
   pixCreate: "e58311c6fbb4baf522f0b45a7ba243559db1c5f222cadd233633b8a7442cfa59",
   pixStatus: "e323b89dfe50b48098cd2430fe7639b0273f98dba91ec51736f31b75bf49c2a2",
+  partnerLogin: "81ea9d9181cd9212af226609ff373301484dcce3d7461649990bf379cba24f39",
+  partnerSession: "dacfd1919a603b8049546aed3702041cd20dcbe8c4a38370c087dbb8935e11dc",
+  partnerUpdate: "b63ef4c925a59aced0080df0c6cb283e717bc141b275c56e426ada517a7c3c3c",
 };
 
 const PAGES = new Map([
@@ -218,8 +223,13 @@ async function handlePixApi(req, res, pathname, search) {
     return;
   }
   const apiKey = req.headers["x-api-key"] || "";
+  const bearer = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const clientId = req.headers.ci || req.headers["x-client-id"] || "";
+  const clientSecret = req.headers.cs || req.headers["x-client-secret"] || bearer || "";
   const expected = process.env.HOTLUNA_API_KEY || "";
-  if (!expected || !safeEqual(apiKey, expected)) {
+  const byApiKey = expected && (safeEqual(apiKey, expected) || safeEqual(bearer, expected));
+  const byClient = partner.credentialsMatch(String(clientId), String(clientSecret));
+  if (!byApiKey && !byClient) {
     sendJson(res, 401, { ok: false, message: "Chave da API Hotluna inválida." });
     return;
   }
@@ -283,6 +293,9 @@ const server = http.createServer(async (req, res) => {
       else if (id === FN.slug) value = configForSlug(fields.slug || "");
       else if (id === FN.pixCreate) value = await pix.issue(fields, { catalogOnly: true });
       else if (id === FN.pixStatus) value = await pix.status(fields.transactionId || "", { refresh: true });
+      else if (id === FN.partnerLogin) value = partner.login(fields);
+      else if (id === FN.partnerSession) value = partner.session(fields.email, fields.password) || { ok: false, message: "Sessão expirada. Entre de novo." };
+      else if (id === FN.partnerUpdate) value = partner.update(fields);
       else if (id === FN.unusedGet) value = {};
       else value = { ok: false, message: "Esta ação do painel antigo não faz parte desta cópia. Use /admin." };
       sendJson(res, 200, { result: value });

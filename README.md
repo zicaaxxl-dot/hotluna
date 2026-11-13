@@ -51,6 +51,18 @@ O arquivo `render.yaml` descreve o serviço. No painel do Render, cadastre:
 
 `PUBLIC_BASE_URL` pode ficar vazio: no Render o servidor usa `RENDER_EXTERNAL_URL` para montar o webhook. As cobranças ficam em disco (`DATA_DIR=/var/data`).
 
-## O que o painel antigo não faz
+## Usuário da API Luna
 
-`/admin2` e `/paineladmin2` são a tela antiga de parceiros. O painel que administra as cobranças novas é `/admin`.
+Entre em http://127.0.0.1:4173/paineladmin2 com `PARTNER_EMAIL` e `PARTNER_PASSWORD`. O painel mostra o Client ID (`ci`) e o Client Secret (`cs`).
+
+Para gerar PIX com essas chaves:
+
+```bash
+curl -X POST http://127.0.0.1:4173/api/v1/pix/create \
+  -H "content-type: application/json" \
+  -H "ci: $LUNA_CLIENT_ID" \
+  -H "cs: $LUNA_CLIENT_SECRET" \
+  -d '{"amount":21.87,"payerName":"Maria Silva","payerDocument":"12345678909","payerEmail":"maria@email.com","payerPhone":"11999999999","description":"Assinatura"}'
+```
+
+O header `x-api-key` continua valendo. As cobranças do site ficam em `/admin`.
