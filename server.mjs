@@ -224,8 +224,8 @@ async function handlePixApi(req, res, pathname, search) {
   }
   const apiKey = req.headers["x-api-key"] || "";
   const bearer = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  const clientId = req.headers.ci || req.headers["x-client-id"] || "";
-  const clientSecret = req.headers.cs || req.headers["x-client-secret"] || bearer || "";
+  const clientId = req.headers.ci || req.headers["x-client-id"] || req.headers["x-public-key"] || "";
+  const clientSecret = req.headers.cs || req.headers["x-client-secret"] || req.headers["x-secret-key"] || bearer || "";
   const expected = process.env.HOTLUNA_API_KEY || "";
   const byApiKey = expected && (safeEqual(apiKey, expected) || safeEqual(bearer, expected));
   const byClient = partner.credentialsMatch(String(clientId), String(clientSecret));

@@ -13,11 +13,16 @@ function seedFromEnv() {
     name: "Conta Principal",
     email: (process.env.PARTNER_EMAIL || "parceiro@hotluna.com").trim().toLowerCase(),
     password: process.env.PARTNER_PASSWORD || `luna-${token(6)}`,
-    clientId: process.env.LUNA_CLIENT_ID || `ci_${token(12)}`,
-    clientSecret: process.env.LUNA_CLIENT_SECRET || `cs_${token(24)}`,
     webhookUrl: "",
     createdAt: new Date().toISOString(),
   };
+}
+
+function sameSecret(left, right) {
+  const a = Buffer.from(String(left));
+  const b = Buffer.from(String(right));
+  if (!a.length || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 export function createPartner(dir) {
@@ -26,7 +31,12 @@ export function createPartner(dir) {
   let account = seedFromEnv();
   if (fs.existsSync(file)) {
     try {
-      account = { ...account, ...JSON.parse(fs.readFileSync(file, "utf8")) };
+      const stored = JSON.parse(fs.readFileSync(file, "utf8"));
+      const hadSeparateKeys = "clientId" in stored || "clientSecret" in stored;
+      delete stored.clientId;
+      delete stored.clientSecret;
+      account = { ...seedFromEnv(), ...stored };
+      if (hadSeparateKeys) save();
     } catch {
       fs.renameSync(file, `${file}.broken-${Date.now()}`);
     }
@@ -51,8 +61,8 @@ export function createPartner(dir) {
       name: account.name,
       email: account.email,
       password: account.password,
-      clientId: account.clientId,
-      clientSecret: account.clientSecret,
+      clientId: process.env.VIZZION_PUBLIC_KEY || "",
+      clientSecret: process.env.VIZZION_SECRET_KEY || "",
       webhookUrl: account.webhookUrl || "",
       discordWebhookUrl: "",
       telegramBotToken: "",
@@ -98,8 +108,7 @@ export function createPartner(dir) {
   function update(input) {
     if (!matches(input.email, input.password)) return { ok: false, message: "E-mail ou senha incorretos." };
     if (input.regenerateKeys) {
-      account.clientId = `ci_${token(12)}`;
-      account.clientSecret = `cs_${token(24)}`;
+      return { ok: false, message: "A chave do parceiro é a chave da Vizzion. Ela não é gerada de novo aqui." };
     }
     if (typeof input.webhookUrl === "string") account.webhookUrl = input.webhookUrl.slice(0, 300);
     const nextPassword = String(input.newPassword || "").trim();
@@ -109,10 +118,9 @@ export function createPartner(dir) {
   }
 
   function credentialsMatch(clientId, clientSecret) {
-    return Boolean(clientId && clientSecret)
-      && clientId === account.clientId
-      && clientSecret === account.clientSecret;
+    return sameSecret(clientId, process.env.VIZZION_PUBLIC_KEY || "")
+      && sameSecret(clientSecret, process.env.VIZZION_SECRET_KEY || "");
   }
 
-  return { login, session, update, credentialsMatch, clientId: () => account.clientId };
+  return { login, session, update, credentialsMatch, clientId: () => process.env.VIZZION_PUBLIC_KEY || "" };
 }

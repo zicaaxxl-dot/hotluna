@@ -53,16 +53,14 @@ O arquivo `render.yaml` descreve o serviço. No painel do Render, cadastre:
 
 ## Usuário da API Luna
 
-Entre em http://127.0.0.1:4173/paineladmin2 com `PARTNER_EMAIL` e `PARTNER_PASSWORD`. O painel mostra o Client ID (`ci`) e o Client Secret (`cs`).
-
-Para gerar PIX com essas chaves:
+O parceiro usa a mesma chave da Vizzion, sem login e sem um par separado. `ci` é a `VIZZION_PUBLIC_KEY`. `cs` é a `VIZZION_SECRET_KEY`.
 
 ```bash
 curl -X POST http://127.0.0.1:4173/api/v1/pix/create \
   -H "content-type: application/json" \
-  -H "ci: $LUNA_CLIENT_ID" \
-  -H "cs: $LUNA_CLIENT_SECRET" \
+  -H "ci: $VIZZION_PUBLIC_KEY" \
+  -H "cs: $VIZZION_SECRET_KEY" \
   -d '{"amount":21.87,"payerName":"Maria Silva","payerDocument":"12345678909","payerEmail":"maria@email.com","payerPhone":"11999999999","description":"Assinatura"}'
 ```
 
-O header `x-api-key` continua valendo. As cobranças do site ficam em `/admin`.
+Os headers `x-public-key` e `x-secret-key` também valem. O painel em `/paineladmin2` mostra esse mesmo par. As cobranças do site ficam em `/admin`.
