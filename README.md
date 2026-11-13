@@ -53,14 +53,14 @@ O arquivo `render.yaml` descreve o serviço. No painel do Render, cadastre:
 
 ## Usuário da API Luna
 
-O parceiro usa a mesma chave da Vizzion, sem login e sem um par separado. `ci` é a `VIZZION_PUBLIC_KEY`. `cs` é a `VIZZION_SECRET_KEY`.
+O site do cliente usa um par próprio da Luna, `LUNA_CLIENT_ID` e `LUNA_CLIENT_SECRET`. Esse par aparece em `/paineladmin2`, no botão **Gerar Novo Par de Chaves**. A chave antiga `ci_e4e626ce6b68908ecb3be4d8` foi recusada de propósito.
 
 ```bash
 curl -X POST http://127.0.0.1:4173/api/v1/pix/create \
   -H "content-type: application/json" \
-  -H "ci: $VIZZION_PUBLIC_KEY" \
-  -H "cs: $VIZZION_SECRET_KEY" \
+  -H "ci: $LUNA_CLIENT_ID" \
+  -H "cs: $LUNA_CLIENT_SECRET" \
   -d '{"amount":21.87,"payerName":"Maria Silva","payerDocument":"12345678909","payerEmail":"maria@email.com","payerPhone":"11999999999","description":"Assinatura"}'
 ```
 
-Os headers `x-public-key` e `x-secret-key` também valem. O painel em `/paineladmin2` mostra esse mesmo par. As cobranças do site ficam em `/admin`.
+A chave pública e a privada da Vizzion também continuam aceitas em `ci`/`cs`. As cobranças do site ficam em `/admin`.

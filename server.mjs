@@ -227,7 +227,9 @@ async function handlePixApi(req, res, pathname, search) {
   const clientId = req.headers.ci || req.headers["x-client-id"] || req.headers["x-public-key"] || "";
   const clientSecret = req.headers.cs || req.headers["x-client-secret"] || req.headers["x-secret-key"] || bearer || "";
   const expected = process.env.HOTLUNA_API_KEY || "";
-  const byApiKey = expected && (safeEqual(apiKey, expected) || safeEqual(bearer, expected));
+  const byApiKey = (expected && (safeEqual(apiKey, expected) || safeEqual(bearer, expected)))
+    || partner.secretMatches(apiKey)
+    || partner.secretMatches(bearer);
   const byClient = partner.credentialsMatch(String(clientId), String(clientSecret));
   if (!byApiKey && !byClient) {
     sendJson(res, 401, { ok: false, message: "Chave da API Hotluna inválida." });
