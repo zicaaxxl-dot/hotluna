@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: hotluna
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: node server.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATA_DIR
+        value: /var/data
+      - key: VIZZION_PUBLIC_KEY
+        sync: false
+      - key: VIZZION_SECRET_KEY
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: HOTLUNA_API_KEY
+        sync: false
+    disk:
+      name: hotluna-data
+      mountPath: /var/data
+      sizeGB: 1

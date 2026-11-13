@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Painel — Hotluna</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b0d12; --card:#12151e; --line:#262a34; --text:#f4f4f5; --muted:#8a96a3; --orange:#ff9d2e; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background:var(--bg); color:var(--text); }
+    header { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:16px 20px; border-bottom:1px solid var(--line); }
+    h1 { font-size:20px; margin:0; }
+    h1 span { color:var(--orange); }
+    main { max-width:1100px; margin:0 auto; padding:20px; }
+    .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; }
+    .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+    .value { font-size:28px; font-weight:800; margin-top:6px; }
+    button, input { font:inherit; }
+    button { background:var(--orange); color:#111; border:0; border-radius:999px; padding:10px 16px; font-weight:700; cursor:pointer; }
+    button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+    input { width:100%; background:#0b0d12; color:white; border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+    form { display:grid; gap:12px; max-width:420px; margin:10vh auto; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--muted); font-size:12px; }
+    .paid { color:#34d399; } .pending { color:#fbbf24; } .bad { color:#f87171; }
+    .hidden { display:none; }
+    code { color:#ffd7a8; }
+    @media (max-width:800px) { .grid { grid-template-columns:1fr 1fr; } table { display:block; overflow-x:auto; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>hotluna<span>.</span> admin</h1>
+    <button class="ghost hidden" id="logout" type="button">Sair</button>
+  </header>
+  <main>
+    <form id="login">
+      <p class="label">Painel de PIX</p>
+      <h2>Entrar</h2>
+      <input id="password" type="password" placeholder="Senha do admin" autocomplete="current-password" required />
+      <button type="submit">Entrar</button>
+      <p id="login-error" class="bad"></p>
+    </form>
+    <section id="app" class="hidden">
+      <div class="grid">
+        <article class="card"><div class="label">Recebido</div><div class="value" id="paid-amount">—</div></article>
+        <article class="card"><div class="label">Pagos</div><div class="value" id="paid-count">—</div></article>
+        <article class="card"><div class="label">Pendentes</div><div class="value" id="pending-count">—</div></article>
+        <article class="card"><div class="label">Cobranças</div><div class="value" id="total-count">—</div></article>
+      </div>
+      <article class="card" style="margin-top:12px">
+        <div class="label">Gateway</div>
+        <p>VizzionPay: <strong id="gateway">—</strong></p>
+        <p>Chave pública: <code id="public-key">—</code></p>
+        <p>Webhook: <code id="webhook">—</code></p>
+        <p class="label">A API do site exige o header <code>x-api-key</code>. A chave fica só no servidor.</p>
+      </article>
+      <article class="card" style="margin-top:12px">
+        <div class="label">Transações</div>
+        <table>
+          <thead><tr><th>Quando</th><th>Cliente</th><th>Descrição</th><th>Valor</th><th>Status</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </article>
+    </section>
+  </main>
+  <script>
+    const money = (value) => Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    const when = (value) => value ? new Date(value).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "—";
+    const login = document.querySelector("#login");
+    const app = document.querySelector("#app");
+    const logout = document.querySelector("#logout");
+
+    async function api(url, options) {
+      const response = await fetch(url, { credentials: "same-origin", ...options });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || "Falha na requisição");
+      return body;
+    }
+
+    function statusClass(status) {
+      if (status === "COMPLETED") return "paid";
+      if (status === "PENDING") return "pending";
+      return "bad";
+    }
+
+    async function load() {
+      const [summary, list] = await Promise.all([
+        api("/api/admin/summary"),
+        api("/api/admin/transactions"),
+      ]);
+      document.querySelector("#paid-amount").textContent = money(summary.paidAmount);
+      document.querySelector("#paid-count").textContent = summary.paid;
+      document.querySelector("#pending-count").textContent = summary.pending;
+      document.querySelector("#total-count").textContent = summary.total;
+      document.querySelector("#gateway").textContent = summary.gatewayConfigured ? "conectado" : "sem chave";
+      document.querySelector("#public-key").textContent = summary.publicKey || "—";
+      document.querySelector("#webhook").textContent = location.origin + "/api/v1/pix/webhook";
+      document.querySelector("#rows").innerHTML = list.transactions.map((row) => `
+        <tr>
+          <td>${when(row.createdAt)}</td>
+          <td>${row.payerName || "—"}<br><span class="label">${row.payerDocument || ""}</span></td>
+          <td>${row.description || ""}</td>
+          <td>${money(row.amount)}</td>
+          <td class="${statusClass(row.status)}">${row.status}</td>
+        </tr>`).join("") || `<tr><td colspan="5">Nenhuma cobrança ainda.</td></tr>`;
+      login.classList.add("hidden");
+      app.classList.remove("hidden");
+      logout.classList.remove("hidden");
+    }
+
+    login.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      document.querySelector("#login-error").textContent = "";
+      try {
+        await api("/api/admin/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: document.querySelector("#password").value }),
+        });
+        await load();
+      } catch (error) {
+        document.querySelector("#login-error").textContent = error.message;
+      }
+    });
+    logout.addEventListener("click", async () => {
+      await api("/api/admin/logout", { method: "POST" });
+      location.reload();
+    });
+    load().catch(() => {});
+    setInterval(() => { if (!app.classList.contains("hidden")) load().catch(() => {}); }, 8000);
+  </script>
+</body>
+</html>

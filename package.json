@@ -1,0 +1,12 @@
+{
+  "name": "hotluna-local",
+  "private": true,
+  "type": "module",
+  "description": "Local recovery of the public site https://hotluna.onrender.com",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}
