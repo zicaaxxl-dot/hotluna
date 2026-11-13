@@ -63,4 +63,4 @@ curl -X POST http://127.0.0.1:4173/api/v1/pix/create \
   -d '{"amount":21.87,"payerName":"Maria Silva","payerDocument":"12345678909","payerEmail":"maria@email.com","payerPhone":"11999999999","description":"Assinatura"}'
 ```
 
-A chave pública e a privada da Vizzion também continuam aceitas em `ci`/`cs`. As cobranças do site ficam em `/admin`.
+A chave pública e a privada da Vizzion também continuam aceitas em `ci`/`cs`. As cobranças aparecem em `/admin` e em `/paineladmin2`. Quando uma cobrança fica paga, a Luna envia `POST` com `event: payment.completed` para a URL salva em **Webhook & Segurança**.

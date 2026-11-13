@@ -16,7 +16,7 @@ const publicDir = path.join(root, "public");
 const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 4173);
 const store = createStore(dataDir(root));
-const partner = createPartner(dataDir(root));
+const partner = createPartner(dataDir(root), store);
 const sessions = new Map();
 const loginAttempts = new Map();
 
@@ -29,6 +29,7 @@ const FN = {
   partnerLogin: "81ea9d9181cd9212af226609ff373301484dcce3d7461649990bf379cba24f39",
   partnerSession: "dacfd1919a603b8049546aed3702041cd20dcbe8c4a38370c087dbb8935e11dc",
   partnerUpdate: "b63ef4c925a59aced0080df0c6cb283e717bc141b275c56e426ada517a7c3c3c",
+  partnerResend: "ac62b5c1a9490ec18ad53bf2e19ced02602127aa92d027daedec0d306cb34574",
 };
 
 const PAGES = new Map([
@@ -85,6 +86,7 @@ const pix = createPixService({
   store,
   homeConfig,
   publicBaseUrl: () => publicBaseUrl(),
+  defaultNotifyUrl: () => partner.webhookUrl(),
 });
 
 function configForSlug(slug) {
@@ -296,8 +298,16 @@ const server = http.createServer(async (req, res) => {
       else if (id === FN.pixCreate) value = await pix.issue(fields, { catalogOnly: true });
       else if (id === FN.pixStatus) value = await pix.status(fields.transactionId || "", { refresh: true });
       else if (id === FN.partnerLogin) value = partner.login(fields);
-      else if (id === FN.partnerSession) value = partner.session(fields.email, fields.password) || { ok: false, message: "Sessão expirada. Entre de novo." };
-      else if (id === FN.partnerUpdate) value = partner.update(fields);
+      else if (id === FN.partnerSession) {
+        value = partner.session(fields.email, fields.password) || { ok: false, message: "Sessão expirada. Entre de novo." };
+        if (value.ok) pix.notifyOutstanding();
+      } else if (id === FN.partnerUpdate) {
+        value = partner.update(fields);
+        if (value.ok) pix.notifyOutstanding();
+      } else if (id === FN.partnerResend) {
+        const session = partner.session(fields.merchantEmail || fields.email, fields.merchantPassword || fields.password);
+        value = session ? await pix.resend(fields.transactionId) : { ok: false, message: "E-mail ou senha incorretos." };
+      }
       else if (id === FN.unusedGet) value = {};
       else value = { ok: false, message: "Esta ação do painel antigo não faz parte desta cópia. Use /admin." };
       sendJson(res, 200, { result: value });

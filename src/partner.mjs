@@ -20,7 +20,7 @@ function freshKeys() {
   return { clientId: `ci_${token(12)}`, clientSecret: `cs_${token(24)}` };
 }
 
-export function createPartner(dir) {
+export function createPartner(dir, store = null) {
   const file = path.join(dir, FILE);
   fs.mkdirSync(dir, { recursive: true });
   let account = {
@@ -94,7 +94,7 @@ export function createPartner(dir) {
 
   function session(email, password) {
     if (!matches(email, password)) return null;
-    return { ok: true, account: view(), payments: [] };
+    return { ok: true, account: view(), payments: panelPayments() };
   }
 
   function login(input) {
@@ -134,12 +134,24 @@ export function createPartner(dir) {
     return sameSecret(value, account.clientSecret);
   }
 
+  function panelPayments() {
+    return (store?.list() || []).map((row) => ({
+      transaction_id: row.id,
+      created_at: row.createdAt,
+      payer_name: row.payerName,
+      description: row.description,
+      amount: row.amount,
+      status: row.status === "COMPLETED" ? "paid" : row.status === "CANCELED" ? "cancelled" : String(row.status || "pending").toLowerCase(),
+    }));
+  }
+
   return {
     login,
     session,
     update,
     credentialsMatch,
     secretMatches,
+    webhookUrl: () => account.webhookUrl || "",
     clientId: () => account.clientId,
   };
 }

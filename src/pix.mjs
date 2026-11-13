@@ -85,7 +85,28 @@ function publicWebhook(base) {
   }
 }
 
-export function createPixService({ store, homeConfig, publicBaseUrl }) {
+function webhookTarget(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  let url;
+  try { url = new URL(raw); } catch { return ""; }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol === "http:" && host === "127.0.0.1" && process.env.NODE_ENV !== "production") return url.toString();
+  if (blockedHost(host) || url.protocol !== "https:") return "";
+  return url.toString();
+}
+
+function blockedHost(host) {
+  if (host === "localhost" || host === "::1" || host.endsWith(".local") || host === "metadata.google.internal") return true;
+  const match = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return false;
+  const a = Number(match[1]);
+  const b = Number(match[2]);
+  if (a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 192 && b === 168)) return true;
+  return a === 172 && b >= 16 && b <= 31;
+}
+
+export function createPixService({ store, homeConfig, publicBaseUrl, defaultNotifyUrl }) {
   const allowed = catalogCents(homeConfig);
 
   async function issue(input, { catalogOnly }) {
@@ -139,6 +160,9 @@ export function createPixService({ store, homeConfig, publicBaseUrl }) {
       description: payer.description,
       payerName: payer.name,
       payerDocument: payer.document,
+      externalRef: String(input.externalRef || "").slice(0, 120),
+      notifyUrl: webhookTarget(input.webhookUrl) || webhookTarget(defaultNotifyUrl?.() || ""),
+      partnerNotifiedAt: null,
       createdAt: new Date().toISOString(),
       paidAt: null,
       lastLookupAt: 0,
@@ -166,10 +190,12 @@ export function createPixService({ store, homeConfig, publicBaseUrl }) {
         const remote = await findTransaction({ id: row.gatewayId, clientIdentifier: row.id });
         applyStatus(row, remote.status);
         store.update(row.id, row);
+        notifyIfPaid(row);
       } catch (error) {
         if (error.status !== 429) console.error("vizzion status", error.status || "", gatewayMessage(error.body || {}));
       }
     }
+    notifyIfPaid(row);
     return { ok: true, status: frontendStatus(row.status), transactionId: row.id };
   }
 
@@ -188,10 +214,65 @@ export function createPixService({ store, homeConfig, publicBaseUrl }) {
     if (event === "TRANSACTION_CHARGED_BACK") status = "CHARGED_BACK";
     if (status) applyStatus(row, status);
     store.update(row.id, row);
+    notifyIfPaid(row);
     return { ok: true, status: 200 };
   }
 
-  return { issue, status, applyWebhook };
+  function notifyIfPaid(row) {
+    if (!row || row.status !== "COMPLETED" || row.partnerNotifiedAt) return;
+    const url = webhookTarget(row.notifyUrl) || webhookTarget(defaultNotifyUrl?.() || "");
+    if (!url) return;
+    row.notifyUrl = url;
+    row.partnerNotifiedAt = new Date().toISOString();
+    store.update(row.id, row);
+    const payload = {
+      event: "payment.completed",
+      timestamp: row.paidAt || row.partnerNotifiedAt,
+      data: {
+        transactionId: row.id,
+        status: "paid",
+        amount: (row.amountCents || 0) / 100,
+        payerName: row.payerName || "",
+        payerDocument: row.payerDocument || "",
+        description: row.description || "",
+        ...(row.externalRef ? { externalRef: row.externalRef } : {}),
+      },
+    };
+    fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "user-agent": "HotLuna/1.0" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000),
+    }).then((response) => {
+      if (response.ok) return;
+      row.partnerNotifiedAt = null;
+      store.update(row.id, row);
+    }).catch(() => {
+      row.partnerNotifiedAt = null;
+      store.update(row.id, row);
+    });
+  }
+
+  function notifyOutstanding() {
+    for (const row of store.list()) {
+      const full = store.get(row.id);
+      if (full) notifyIfPaid(full);
+    }
+  }
+
+  async function resend(transactionId) {
+    const row = store.get(transactionId);
+    if (!row) return { ok: false, message: "Cobrança não encontrada." };
+    if (row.status !== "COMPLETED") return { ok: false, message: "Essa cobrança ainda não está paga." };
+    const url = webhookTarget(row.notifyUrl) || webhookTarget(defaultNotifyUrl?.() || "");
+    if (!url) return { ok: false, message: "Cadastre a URL de webhook no painel." };
+    row.partnerNotifiedAt = null;
+    row.notifyUrl = url;
+    notifyIfPaid(row);
+    return { ok: true };
+  }
+
+  return { issue, status, applyWebhook, notifyOutstanding, resend };
 }
 
 function applyStatus(row, status) {
