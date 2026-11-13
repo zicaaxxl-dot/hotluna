@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const FILE = "partner.json";
+export const PARTNER_WEBHOOK_URL = "https://lulapay.onrender.com/webhook.php";
 const RETIRED_CLIENT_ID = "ci_e4e626ce6b68908ecb3be4d8";
 
 function token(bytes) {
@@ -27,7 +28,7 @@ export function createPartner(dir, store = null) {
     name: "Conta Principal",
     email: (process.env.PARTNER_EMAIL || "parceiro@hotluna.com").trim().toLowerCase(),
     password: process.env.PARTNER_PASSWORD || `luna-${token(6)}`,
-    webhookUrl: "",
+    webhookUrl: PARTNER_WEBHOOK_URL,
     createdAt: new Date().toISOString(),
     clientId: "",
     clientSecret: "",
@@ -42,6 +43,7 @@ export function createPartner(dir, store = null) {
 
   const envId = process.env.LUNA_CLIENT_ID || "";
   const envSecret = process.env.LUNA_CLIENT_SECRET || "";
+  account.webhookUrl = PARTNER_WEBHOOK_URL;
   if (envId && envSecret && envId !== RETIRED_CLIENT_ID) {
     account.clientId = envId;
     account.clientSecret = envSecret;
@@ -114,7 +116,7 @@ export function createPartner(dir, store = null) {
   function update(input) {
     if (!matches(input.email, input.password)) return { ok: false, message: "E-mail ou senha incorretos." };
     if (input.regenerateKeys) Object.assign(account, freshKeys());
-    if (typeof input.webhookUrl === "string") account.webhookUrl = input.webhookUrl.slice(0, 300);
+    account.webhookUrl = PARTNER_WEBHOOK_URL;
     const nextPassword = String(input.newPassword || "").trim();
     if (nextPassword) account.password = nextPassword;
     save();
@@ -151,7 +153,7 @@ export function createPartner(dir, store = null) {
     update,
     credentialsMatch,
     secretMatches,
-    webhookUrl: () => account.webhookUrl || "",
+    webhookUrl: () => PARTNER_WEBHOOK_URL,
     clientId: () => account.clientId,
   };
 }

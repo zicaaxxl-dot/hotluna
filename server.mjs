@@ -220,7 +220,7 @@ async function handlePixApi(req, res, pathname, search) {
     const raw = await readBody(req);
     let body = {};
     try { body = JSON.parse(raw || "{}"); } catch { body = {}; }
-    const result = pix.applyWebhook(body);
+    const result = await pix.applyWebhook(body);
     sendJson(res, result.status, { ok: result.ok });
     return;
   }

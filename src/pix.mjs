@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import QRCode from "qrcode";
+import { PARTNER_WEBHOOK_URL } from "./partner.mjs";
 import { createPixCharge, findTransaction, gatewayMessage, vizzionConfigured } from "./vizzion.mjs";
 
 const LOOKUP_GAP_MS = 25_000;
@@ -160,8 +161,8 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
       description: payer.description,
       payerName: payer.name,
       payerDocument: payer.document,
-      externalRef: String(input.externalRef || "").slice(0, 120),
-      notifyUrl: webhookTarget(input.webhookUrl) || webhookTarget(defaultNotifyUrl?.() || ""),
+      externalRef: String(input.externalRef || input.external_id || input.orderId || "").slice(0, 120),
+      notifyUrl: PARTNER_WEBHOOK_URL,
       partnerNotifiedAt: null,
       createdAt: new Date().toISOString(),
       paidAt: null,
@@ -170,11 +171,21 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
     await store.add(row);
     return {
       ok: true,
+      success: true,
+      id,
+      transactionId: id,
       status: "pending",
+      amount: payer.amount,
+      pix_code: copyPaste,
+      copyPaste,
+      qrCodeBase64,
       data: {
+        id,
         transactionId: id,
         amount: payer.amount,
+        status: "pending",
         copyPaste,
+        pix_code: copyPaste,
         qrCodeBase64,
       },
     };
@@ -190,16 +201,16 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
         const remote = await findTransaction({ id: row.gatewayId, clientIdentifier: row.id });
         applyStatus(row, remote.status);
         store.update(row.id, row);
-        notifyIfPaid(row);
+        await notifyIfPaid(row);
       } catch (error) {
         if (error.status !== 429) console.error("vizzion status", error.status || "", gatewayMessage(error.body || {}));
       }
     }
-    notifyIfPaid(row);
-    return { ok: true, status: frontendStatus(row.status), transactionId: row.id };
+    await notifyIfPaid(row);
+    return { ok: true, id: row.id, status: frontendStatus(row.status), transactionId: row.id };
   }
 
-  function applyWebhook(body) {
+  async function applyWebhook(body) {
     const transaction = body?.transaction || body?.data?.transaction || {};
     const id = transaction.identifier || body?.identifier || "";
     const gatewayId = transaction.id || body?.transactionId || "";
@@ -214,49 +225,70 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
     if (event === "TRANSACTION_CHARGED_BACK") status = "CHARGED_BACK";
     if (status) applyStatus(row, status);
     store.update(row.id, row);
-    notifyIfPaid(row);
+    await notifyIfPaid(row);
     return { ok: true, status: 200 };
   }
 
-  function notifyIfPaid(row) {
-    if (!row || row.status !== "COMPLETED" || row.partnerNotifiedAt) return;
-    const url = webhookTarget(row.notifyUrl) || webhookTarget(defaultNotifyUrl?.() || "");
-    if (!url) return;
-    row.notifyUrl = url;
-    row.partnerNotifiedAt = new Date().toISOString();
-    store.update(row.id, row);
-    const payload = {
-      event: "payment.completed",
-      timestamp: row.paidAt || row.partnerNotifiedAt,
+  function paidPayload(row, transactionId) {
+    const amount = (row.amountCents || 0) / 100;
+    return {
+      event: "TRANSACTION_PAID",
+      transactionId,
+      status: "PAID",
+      transaction: {
+        id: row.gatewayId || transactionId,
+        identifier: transactionId,
+        status: "COMPLETED",
+        amount,
+      },
       data: {
-        transactionId: row.id,
+        id: transactionId,
+        transactionId,
         status: "paid",
-        amount: (row.amountCents || 0) / 100,
+        amount,
         payerName: row.payerName || "",
         payerDocument: row.payerDocument || "",
         description: row.description || "",
         ...(row.externalRef ? { externalRef: row.externalRef } : {}),
       },
     };
-    fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", "user-agent": "HotLuna/1.0" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(8000),
-    }).then((response) => {
-      if (response.ok) return;
-      row.partnerNotifiedAt = null;
-      store.update(row.id, row);
-    }).catch(() => {
-      row.partnerNotifiedAt = null;
-      store.update(row.id, row);
-    });
   }
 
-  function notifyOutstanding() {
+  async function postPaid(row, transactionId) {
+    const response = await fetch(PARTNER_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json", "user-agent": "HotLuna/1.0" },
+      body: JSON.stringify(paidPayload(row, transactionId)),
+      signal: AbortSignal.timeout(8000),
+    });
+    const body = await response.text();
+    const accepted = response.ok && !body.toLowerCase().includes("pendente");
+    console.log(`webhook lulapay ${response.status} ${accepted ? "aceito" : "pendente"}`);
+    return accepted;
+  }
+
+  async function notifyIfPaid(row) {
+    if (!row || row.status !== "COMPLETED" || row.partnerNotifiedAt) return;
+    try {
+      const ids = [...new Set([row.id, row.gatewayId, row.externalRef].filter(Boolean))];
+      let accepted = false;
+      for (const transactionId of ids) {
+        accepted = await postPaid(row, transactionId);
+        if (accepted) break;
+      }
+      if (!accepted) return;
+      row.notifyUrl = PARTNER_WEBHOOK_URL;
+      row.partnerNotifiedAt = new Date().toISOString();
+      store.update(row.id, row);
+    } catch (error) {
+      console.error("webhook lulapay", error.message || error);
+    }
+  }
+
+  async function notifyOutstanding() {
     for (const row of store.list()) {
       const full = store.get(row.id);
-      if (full) notifyIfPaid(full);
+      if (full) await notifyIfPaid(full);
     }
   }
 
@@ -264,12 +296,12 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
     const row = store.get(transactionId);
     if (!row) return { ok: false, message: "Cobrança não encontrada." };
     if (row.status !== "COMPLETED") return { ok: false, message: "Essa cobrança ainda não está paga." };
-    const url = webhookTarget(row.notifyUrl) || webhookTarget(defaultNotifyUrl?.() || "");
-    if (!url) return { ok: false, message: "Cadastre a URL de webhook no painel." };
     row.partnerNotifiedAt = null;
-    row.notifyUrl = url;
-    notifyIfPaid(row);
-    return { ok: true };
+    row.notifyUrl = PARTNER_WEBHOOK_URL;
+    await notifyIfPaid(row);
+    return row.partnerNotifiedAt
+      ? { ok: true }
+      : { ok: false, message: "A LulaPay recebeu o aviso e ainda deixou a cobrança pendente." };
   }
 
   return { issue, status, applyWebhook, notifyOutstanding, resend };
