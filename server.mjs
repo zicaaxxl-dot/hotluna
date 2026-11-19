@@ -87,6 +87,7 @@ function publicBaseUrl(requestHost) {
 
 const pix = createPixService({
   store,
+  gateways,
   homeConfig,
   publicBaseUrl: () => publicBaseUrl(),
   defaultNotifyUrl: () => partner.webhookUrl(),

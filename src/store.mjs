@@ -30,6 +30,9 @@ export function createStore(dir) {
     list() {
       return rows.map(publicRow);
     },
+    all() {
+      return rows;
+    },
     get(id) {
       return rows.find((row) => row.id === id || row.gatewayId === id) || null;
     },

@@ -5,6 +5,13 @@ function empty() {
   return { a: { publicKey: "", secretKey: "" }, b: { publicKey: "", secretKey: "" } };
 }
 
+function webhookState(value) {
+  return {
+    enabled: value?.enabled !== false,
+    since: String(value?.since || ""),
+  };
+}
+
 function envPair(which) {
   if (which === "b") {
     return {
@@ -22,6 +29,7 @@ export function createGateways(dir) {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "gateways.json");
   let saved = empty();
+  let bWebhook = webhookState();
   if (fs.existsSync(file)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -31,6 +39,7 @@ export function createGateways(dir) {
           secretKey: String(parsed?.[which]?.secretKey || ""),
         };
       }
+      bWebhook = webhookState(parsed?.bWebhook);
     } catch {
       fs.renameSync(file, `${file}.broken-${Date.now()}`);
     }
@@ -38,7 +47,7 @@ export function createGateways(dir) {
 
   function persist() {
     const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ a: saved.a, b: saved.b }));
+    fs.writeFileSync(tmp, JSON.stringify({ a: saved.a, b: saved.b, bWebhook }));
     fs.renameSync(tmp, file);
   }
 
@@ -64,5 +73,19 @@ export function createGateways(dir) {
     return { publicKey: got.publicKey, secretSet: Boolean(got.secretKey) };
   }
 
-  return { keys, savePair, publicInfo };
+  function bWebhookPolicy() {
+    return { enabled: bWebhook.enabled !== false, since: bWebhook.since || "" };
+  }
+
+  function setBWebhook(enabled) {
+    const on = Boolean(enabled);
+    const wasOn = bWebhook.enabled !== false;
+    if (on === wasOn) return false;
+    bWebhook.enabled = on;
+    if (on) bWebhook.since = new Date().toISOString();
+    persist();
+    return on;
+  }
+
+  return { keys, savePair, publicInfo, bWebhookPolicy, setBWebhook };
 }

@@ -119,7 +119,7 @@ function blockedHost(host) {
   return a === 172 && b >= 16 && b <= 31;
 }
 
-export function createPixService({ store, homeConfig, publicBaseUrl, defaultNotifyUrl }) {
+export function createPixService({ store, homeConfig, publicBaseUrl, defaultNotifyUrl, gateways = null }) {
   const allowed = catalogCents(homeConfig);
 
   async function issue(input, { catalogOnly, gateway = "a" }) {
@@ -293,8 +293,21 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
     return accepted;
   }
 
+  function holdRouteB(row) {
+    if (row.gateway !== "b" || !gateways) return false;
+    const policy = gateways.bWebhookPolicy();
+    if (!policy.enabled) return true;
+    if (policy.since && String(row.createdAt || "") < policy.since) {
+      row.partnerSkippedAt = row.partnerSkippedAt || new Date().toISOString();
+      store.update(row.id, row);
+      return true;
+    }
+    return false;
+  }
+
   async function notifyIfPaid(row) {
-    if (!row || row.status !== "COMPLETED" || row.partnerNotifiedAt) return;
+    if (!row || row.status !== "COMPLETED" || row.partnerNotifiedAt || row.partnerSkippedAt) return;
+    if (holdRouteB(row)) return;
     try {
       const ids = [...new Set([row.id, row.gatewayId, row.externalRef].filter(Boolean))];
       let accepted = false;

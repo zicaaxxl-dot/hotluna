@@ -95,6 +95,7 @@ export function createPartner(dir, store = null, gateways = null) {
         vizzionASecretSet: gatewayA.secretSet,
         vizzionBPublicKey: gatewayB.publicKey,
         vizzionBSecretSet: gatewayB.secretSet,
+        vizzionBLulaWebhook: gateways?.bWebhookPolicy()?.enabled === false ? "off" : "on",
       },
       vitrine: { enabled: true, slug: "lunaharts" },
     };
@@ -126,6 +127,19 @@ export function createPartner(dir, store = null, gateways = null) {
     if (gateways && (typeof input.vizzionAPublicKey === "string" || typeof input.vizzionBPublicKey === "string")) {
       gateways.savePair("a", input.vizzionAPublicKey, input.vizzionASecretKey);
       gateways.savePair("b", input.vizzionBPublicKey, input.vizzionBSecretKey);
+    }
+    if (gateways && (input.vizzionBLulaWebhook === "on" || input.vizzionBLulaWebhook === "off")) {
+      const turnedOn = gateways.setBWebhook(input.vizzionBLulaWebhook === "on");
+      if (turnedOn && store) {
+        const since = gateways.bWebhookPolicy().since;
+        for (const row of store.all()) {
+          if (row.gateway !== "b" || row.partnerNotifiedAt || row.partnerSkippedAt) continue;
+          if (!since || String(row.createdAt || "") < since) {
+            row.partnerSkippedAt = new Date().toISOString();
+            store.update(row.id, row);
+          }
+        }
+      }
     }
     const nextPassword = String(input.newPassword || "").trim();
     if (nextPassword) account.password = nextPassword;
