@@ -1,16 +1,41 @@
 const BASE = "https://app.vizzionpay.com.br/api/v1";
 
-export function vizzionConfigured() {
-  return Boolean(process.env.VIZZION_PUBLIC_KEY && process.env.VIZZION_SECRET_KEY);
+function envKeys(gateway) {
+  if (gateway === "b") {
+    return {
+      publicKey: process.env.VIZZION_B_PUBLIC_KEY || "",
+      secretKey: process.env.VIZZION_B_SECRET_KEY || "",
+    };
+  }
+  return {
+    publicKey: process.env.VIZZION_PUBLIC_KEY || "",
+    secretKey: process.env.VIZZION_SECRET_KEY || "",
+  };
 }
 
-function headers() {
+let resolveKeys = envKeys;
+
+export function useGatewayKeys(fn) {
+  resolveKeys = typeof fn === "function" ? fn : envKeys;
+}
+
+export function gatewayName(value) {
+  return value === "b" ? "b" : "a";
+}
+
+export function vizzionConfigured(gateway = "a") {
+  const keys = resolveKeys(gatewayName(gateway));
+  return Boolean(keys.publicKey && keys.secretKey);
+}
+
+function headers(gateway) {
+  const keys = resolveKeys(gatewayName(gateway));
   return {
     "content-type": "application/json",
     accept: "application/json",
     "user-agent": "HotLuna/1.0",
-    "x-public-key": process.env.VIZZION_PUBLIC_KEY,
-    "x-secret-key": process.env.VIZZION_SECRET_KEY,
+    "x-public-key": keys.publicKey,
+    "x-secret-key": keys.secretKey,
   };
 }
 
@@ -37,10 +62,10 @@ export function gatewayMessage(body) {
   );
 }
 
-export async function createPixCharge(input) {
+export async function createPixCharge(input, gateway = "a") {
   const response = await fetch(`${BASE}/gateway/pix/receive`, {
     method: "POST",
-    headers: headers(),
+    headers: headers(gateway),
     body: JSON.stringify(input),
   });
   const body = await readJson(response);
@@ -53,13 +78,13 @@ export async function createPixCharge(input) {
   return body;
 }
 
-export async function findTransaction({ id, clientIdentifier }) {
+export async function findTransaction({ id, clientIdentifier }, gateway = "a") {
   const query = new URLSearchParams();
   if (id) query.set("id", id);
   if (clientIdentifier) query.set("clientIdentifier", clientIdentifier);
   const response = await fetch(`${BASE}/gateway/transactions?${query}`, {
     method: "GET",
-    headers: headers(),
+    headers: headers(gateway),
   });
   const body = await readJson(response);
   if (!response.ok) {

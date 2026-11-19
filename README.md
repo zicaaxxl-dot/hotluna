@@ -63,4 +63,22 @@ curl -X POST http://127.0.0.1:4173/api/v1/pix/create \
   -d '{"amount":21.87,"payerName":"Maria Silva","payerDocument":"12345678909","payerEmail":"maria@email.com","payerPhone":"11999999999","description":"Assinatura"}'
 ```
 
-A chave pública e a privada da Vizzion também continuam aceitas em `ci`/`cs`. As cobranças aparecem em `/admin` e em `/paineladmin2`. Quando uma cobrança fica paga, a Luna avisa sempre `https://lulapay.onrender.com/webhook.php`.
+A chave pública e a privada da Vizzion também continuam aceitas em `ci`/`cs`. As cobranças aparecem em `/admin` e em `/paineladmin2`. Quando uma cobrança fica paga, a Luna avisa sempre `https://lulapay.onrender.com/webhook.php`, e o POST inclui `gateway` com `"a"` ou `"b"`.
+
+O mesmo `ci`/`cs` escolhe a conta pela rota. Gateway A usa `VIZZION_PUBLIC_KEY` e `VIZZION_SECRET_KEY`. Gateway B usa `VIZZION_B_PUBLIC_KEY` e `VIZZION_B_SECRET_KEY`, vazias até serem definidas. O checkout público fica na gateway A.
+
+```bash
+curl -X POST http://127.0.0.1:4173/api/v1/pix/a/create \
+  -H "content-type: application/json" \
+  -H "ci: $LUNA_CLIENT_ID" \
+  -H "cs: $LUNA_CLIENT_SECRET" \
+  -d '{"amount":21.87,"payerName":"Maria Silva","payerDocument":"12345678909","payerEmail":"maria@email.com","payerPhone":"11999999999","description":"Assinatura"}'
+
+curl -X POST http://127.0.0.1:4173/api/v1/pix/b/create \
+  -H "content-type: application/json" \
+  -H "ci: $LUNA_CLIENT_ID" \
+  -H "cs: $LUNA_CLIENT_SECRET" \
+  -d '{"amount":21.87,"payerName":"Maria Silva","payerDocument":"12345678909","payerEmail":"maria@email.com","payerPhone":"11999999999","description":"Assinatura"}'
+```
+
+`/api/v1/pix/create` e `/api/v1/pix/status` continuam na gateway A. A consulta da B é `GET /api/v1/pix/b/status?transactionId=ID`. Em `/paineladmin2`, na aba **Minha Gateway PIX**, as duas contas podem ser editadas. A resposta não devolve o segredo. Segredo em branco mantém o que já está salvo.

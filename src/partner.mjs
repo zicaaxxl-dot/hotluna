@@ -21,7 +21,7 @@ function freshKeys() {
   return { clientId: `ci_${token(12)}`, clientSecret: `cs_${token(24)}` };
 }
 
-export function createPartner(dir, store = null) {
+export function createPartner(dir, store = null, gateways = null) {
   const file = path.join(dir, FILE);
   fs.mkdirSync(dir, { recursive: true });
   let account = {
@@ -64,6 +64,8 @@ export function createPartner(dir, store = null) {
   }
 
   function view() {
+    const gatewayA = gateways?.publicInfo("a") || { publicKey: "", secretSet: false };
+    const gatewayB = gateways?.publicInfo("b") || { publicKey: "", secretSet: false };
     return {
       id: "acc-luna",
       name: account.name,
@@ -89,6 +91,10 @@ export function createPartner(dir, store = null) {
           emailMode: "dynamic",
           phoneMode: "dynamic",
         },
+        vizzionAPublicKey: gatewayA.publicKey,
+        vizzionASecretSet: gatewayA.secretSet,
+        vizzionBPublicKey: gatewayB.publicKey,
+        vizzionBSecretSet: gatewayB.secretSet,
       },
       vitrine: { enabled: true, slug: "lunaharts" },
     };
@@ -117,6 +123,10 @@ export function createPartner(dir, store = null) {
     if (!matches(input.email, input.password)) return { ok: false, message: "E-mail ou senha incorretos." };
     if (input.regenerateKeys) Object.assign(account, freshKeys());
     account.webhookUrl = PARTNER_WEBHOOK_URL;
+    if (gateways && (typeof input.vizzionAPublicKey === "string" || typeof input.vizzionBPublicKey === "string")) {
+      gateways.savePair("a", input.vizzionAPublicKey, input.vizzionASecretKey);
+      gateways.savePair("b", input.vizzionBPublicKey, input.vizzionBSecretKey);
+    }
     const nextPassword = String(input.newPassword || "").trim();
     if (nextPassword) account.password = nextPassword;
     save();

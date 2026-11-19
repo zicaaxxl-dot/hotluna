@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import QRCode from "qrcode";
 import { PARTNER_WEBHOOK_URL } from "./partner.mjs";
-import { createPixCharge, findTransaction, gatewayMessage, vizzionConfigured } from "./vizzion.mjs";
+import { createPixCharge, findTransaction, gatewayMessage, gatewayName, vizzionConfigured } from "./vizzion.mjs";
 
 const LOOKUP_GAP_MS = 25_000;
 
@@ -60,7 +60,7 @@ function phoneDigits(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-export function validatePayer(input, { catalog = null } = {}) {
+export function validatePayer(input, { catalog = null, donation = false } = {}) {
   const amount = Number(input.amount);
   const name = String(input.payerName || input.name || "").trim();
   const document = phoneDigits(input.payerDocument || input.document);
@@ -70,9 +70,21 @@ export function validatePayer(input, { catalog = null } = {}) {
   if (document.length !== 11 && document.length !== 14) return { error: "Informe um CPF ou CNPJ válido." };
   if (!email.includes("@") || !email.includes(".")) return { error: "Informe um e-mail válido." };
   if (phone.length < 10 || phone.length > 13) return { error: "Informe um celular com DDD." };
-  if (!Number.isFinite(amount) || amount < 1 || amount > 10000) return { error: "Valor inválido." };
+  const rounded = Math.round(amount * 100);
+  if (donation) {
+    if (!Number.isFinite(amount) || rounded < 10000 || rounded > 1000000) return { error: "A doação mínima é de R$ 100." };
+  } else if (!Number.isFinite(amount) || amount < 1 || amount > 10000) {
+    return { error: "Valor inválido." };
+  }
   if (catalog && !catalog.has(cents(amount))) return { error: "Esse valor não corresponde a um plano do site." };
-  return { amount, name, document, email, phone, description: String(input.description || "Assinatura Luna Harts").slice(0, 180) };
+  return {
+    amount,
+    name,
+    document,
+    email,
+    phone,
+    description: donation ? "Doação" : String(input.description || "Assinatura Luna Harts").slice(0, 180),
+  };
 }
 
 function publicWebhook(base) {
@@ -110,18 +122,27 @@ function blockedHost(host) {
 export function createPixService({ store, homeConfig, publicBaseUrl, defaultNotifyUrl }) {
   const allowed = catalogCents(homeConfig);
 
-  async function issue(input, { catalogOnly }) {
-    if (!vizzionConfigured()) {
-      return { ok: false, message: "Chaves da VizzionPay não configuradas no servidor." };
-    }
-    const payer = validatePayer(input, { catalog: catalogOnly ? allowed : null });
+  async function issue(input, { catalogOnly, gateway = "a" }) {
+    const which = gatewayName(gateway);
+    const donation = Boolean(catalogOnly) && (
+      String(input.donation || "") === "1" || String(input.description || "").trim() === "Doação"
+    );
+    const payer = validatePayer(input, { catalog: donation || !catalogOnly ? null : allowed, donation });
     if (payer.error) return { ok: false, message: payer.error };
+    if (!vizzionConfigured(which)) {
+      return {
+        ok: false,
+        message: which === "b"
+          ? "Chaves da gateway B não configuradas no servidor."
+          : "Chaves da VizzionPay não configuradas no servidor.",
+      };
+    }
 
     const id = `hl_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
     const callbackUrl = publicWebhook(publicBaseUrl());
-    let gateway;
+    let charge;
     try {
-      gateway = await createPixCharge({
+      charge = await createPixCharge({
         identifier: id,
         amount: payer.amount,
         client: {
@@ -140,24 +161,25 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
           },
         ],
         ...(callbackUrl ? { callbackUrl } : {}),
-      });
+      }, which);
     } catch (error) {
       return { ok: false, message: error.message || "Não foi possível gerar o PIX." };
     }
 
-    const pix = gateway.pix || {};
+    const pix = charge.pix || {};
     const copyPaste = pix.code || "";
-    if (!copyPaste) return { ok: false, message: gateway.errorDescription || "A VizzionPay não devolveu o código PIX." };
+    if (!copyPaste) return { ok: false, message: charge.errorDescription || "A VizzionPay não devolveu o código PIX." };
     const qrCodeBase64 = pix.image && String(pix.image).startsWith("data:")
       ? pix.image
       : await QRCode.toDataURL(copyPaste, { margin: 1, width: 320 });
 
     const row = {
       id,
-      gatewayId: gateway.transactionId || "",
-      webhookToken: gateway.webhookToken || "",
+      gateway: which,
+      gatewayId: charge.transactionId || "",
+      webhookToken: charge.webhookToken || "",
       amountCents: cents(payer.amount),
-      status: gateway.transactionStatus || "PENDING",
+      status: charge.transactionStatus || "PENDING",
       description: payer.description,
       payerName: payer.name,
       payerDocument: payer.document,
@@ -191,14 +213,15 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
     };
   }
 
-  async function status(transactionId, { refresh = false } = {}) {
+  async function status(transactionId, { refresh = false, gateway = "a" } = {}) {
     const row = store.get(transactionId);
     if (!row) return { ok: false, message: "Cobrança não encontrada." };
+    const which = row.gateway === "b" || row.gateway === "a" ? row.gateway : gatewayName(gateway);
     const stale = Date.now() - (row.lastLookupAt || 0) > LOOKUP_GAP_MS;
-    if (refresh && row.status === "PENDING" && stale && vizzionConfigured()) {
+    if (refresh && row.status === "PENDING" && stale && vizzionConfigured(which)) {
       row.lastLookupAt = Date.now();
       try {
-        const remote = await findTransaction({ id: row.gatewayId, clientIdentifier: row.id });
+        const remote = await findTransaction({ id: row.gatewayId, clientIdentifier: row.id }, which);
         applyStatus(row, remote.status);
         store.update(row.id, row);
         await notifyIfPaid(row);
@@ -207,7 +230,7 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
       }
     }
     await notifyIfPaid(row);
-    return { ok: true, id: row.id, status: frontendStatus(row.status), transactionId: row.id };
+    return { ok: true, id: row.id, status: frontendStatus(row.status), transactionId: row.id, gateway: which };
   }
 
   async function applyWebhook(body) {
@@ -231,8 +254,10 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
 
   function paidPayload(row, transactionId) {
     const amount = (row.amountCents || 0) / 100;
+    const gateway = row.gateway === "b" ? "b" : "a";
     return {
       event: "TRANSACTION_PAID",
+      gateway,
       transactionId,
       status: "PAID",
       transaction: {
@@ -246,6 +271,7 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
         transactionId,
         status: "paid",
         amount,
+        gateway,
         payerName: row.payerName || "",
         payerDocument: row.payerDocument || "",
         description: row.description || "",

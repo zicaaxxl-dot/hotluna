@@ -15,6 +15,10 @@ services:
         sync: false
       - key: VIZZION_SECRET_KEY
         sync: false
+      - key: VIZZION_B_PUBLIC_KEY
+        sync: false
+      - key: VIZZION_B_SECRET_KEY
+        sync: false
       - key: ADMIN_PASSWORD
         sync: false
       - key: HOTLUNA_API_KEY

@@ -7,7 +7,8 @@ import { dataDir, loadEnv } from "./src/env.mjs";
 import { createPixService, parsePayload } from "./src/pix.mjs";
 import { createPartner } from "./src/partner.mjs";
 import { createStore } from "./src/store.mjs";
-import { vizzionConfigured } from "./src/vizzion.mjs";
+import { useGatewayKeys, vizzionConfigured } from "./src/vizzion.mjs";
+import { createGateways } from "./src/gateways.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 loadEnv(path.join(root, ".env"));
@@ -16,7 +17,9 @@ const publicDir = path.join(root, "public");
 const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 4173);
 const store = createStore(dataDir(root));
-const partner = createPartner(dataDir(root), store);
+const gateways = createGateways(dataDir(root));
+useGatewayKeys((name) => gateways.keys(name));
+const partner = createPartner(dataDir(root), store, gateways);
 const sessions = new Map();
 const loginAttempts = new Map();
 
@@ -237,15 +240,22 @@ async function handlePixApi(req, res, pathname, search) {
     sendJson(res, 401, { ok: false, message: "Chave da API Hotluna inválida." });
     return;
   }
-  if (pathname === "/api/v1/pix/create" && req.method === "POST") {
+  const routed = pathname.match(/^\/api\/v1\/pix\/(?:([ab])\/)?(create|status)$/);
+  if (!routed) {
+    sendJson(res, 404, { ok: false, message: "Rota não encontrada." });
+    return;
+  }
+  const gateway = routed[1] === "b" ? "b" : "a";
+  const action = routed[2];
+  if (action === "create" && req.method === "POST") {
     const body = JSON.parse((await readBody(req)) || "{}");
-    const result = await pix.issue(body, { catalogOnly: false });
+    const result = await pix.issue(body, { catalogOnly: false, gateway });
     sendJson(res, result.ok ? 200 : 400, result);
     return;
   }
-  if (pathname === "/api/v1/pix/status" && req.method === "GET") {
+  if (action === "status" && req.method === "GET") {
     const id = new URLSearchParams(search).get("transactionId") || "";
-    const result = await pix.status(id, { refresh: true });
+    const result = await pix.status(id, { refresh: true, gateway });
     sendJson(res, result.ok ? 200 : 404, result);
     return;
   }
@@ -295,8 +305,8 @@ const server = http.createServer(async (req, res) => {
       let value;
       if (id === FN.home) value = structuredClone(homeConfig);
       else if (id === FN.slug) value = configForSlug(fields.slug || "");
-      else if (id === FN.pixCreate) value = await pix.issue(fields, { catalogOnly: true });
-      else if (id === FN.pixStatus) value = await pix.status(fields.transactionId || "", { refresh: true });
+      else if (id === FN.pixCreate) value = await pix.issue(fields, { catalogOnly: true, gateway: "a" });
+      else if (id === FN.pixStatus) value = await pix.status(fields.transactionId || "", { refresh: true, gateway: "a" });
       else if (id === FN.partnerLogin) value = partner.login(fields);
       else if (id === FN.partnerSession) {
         value = partner.session(fields.email, fields.password) || { ok: false, message: "Sessão expirada. Entre de novo." };
