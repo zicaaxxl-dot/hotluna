@@ -132,13 +132,17 @@ export function createPartner(dir, store = null, gateways = null) {
       const turnedOn = gateways.setBWebhook(input.vizzionBLulaWebhook === "on");
       if (turnedOn && store) {
         const since = gateways.bWebhookPolicy().since;
+        const stamp = new Date().toISOString();
+        let changed = false;
         for (const row of store.all()) {
           if (row.gateway !== "b" || row.partnerNotifiedAt || row.partnerSkippedAt) continue;
           if (!since || String(row.createdAt || "") < since) {
-            row.partnerSkippedAt = new Date().toISOString();
-            store.update(row.id, row);
+            row.partnerSkippedAt = stamp;
+            row.updatedAt = stamp;
+            changed = true;
           }
         }
+        if (changed) store.save();
       }
     }
     const nextPassword = String(input.newPassword || "").trim();
@@ -161,12 +165,12 @@ export function createPartner(dir, store = null, gateways = null) {
   }
 
   function panelPayments() {
-    return (store?.list() || []).map((row) => ({
+    return (store?.all() || []).slice(0, 200).map((row) => ({
       transaction_id: row.id,
       created_at: row.createdAt,
-      payer_name: row.payerName,
-      description: row.description,
-      amount: row.amount,
+      payer_name: row.payerName || "",
+      description: row.description || "",
+      amount: (row.amountCents || 0) / 100,
       status: row.status === "COMPLETED" ? "paid" : row.status === "CANCELED" ? "cancelled" : String(row.status || "pending").toLowerCase(),
     }));
   }

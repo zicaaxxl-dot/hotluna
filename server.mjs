@@ -117,12 +117,33 @@ function sendJson(res, status, value, extraHeaders) {
   send(res, status, JSON.stringify(value), "application/json; charset=utf-8", extraHeaders);
 }
 
-function readBody(req) {
+function readBody(req, limit = 1_000_000) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
+    let size = 0;
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    req.on("data", (chunk) => {
+      if (settled) return;
+      size += chunk.length;
+      if (size > limit) {
+        const error = new Error("Pedido grande demais.");
+        error.status = 413;
+        fail(error);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+    req.on("error", fail);
   });
 }
 
@@ -357,7 +378,10 @@ const server = http.createServer(async (req, res) => {
     send(res, 200, page, TYPES[".html"]);
   } catch (error) {
     console.error(error.message || error);
-    if (!res.headersSent) sendJson(res, 500, { ok: false, message: "Erro interno." });
+    if (!res.headersSent && !res.destroyed) {
+      const tooBig = error.status === 413;
+      sendJson(res, tooBig ? 413 : 500, { ok: false, message: tooBig ? "Pedido grande demais." : "Erro interno." });
+    }
   }
 });
 

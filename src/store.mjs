@@ -14,16 +14,27 @@ export function createStore(dir) {
     }
   }
 
-  let writing = Promise.resolve();
+  let chain = Promise.resolve();
+  let pending = null;
+  let queued = false;
 
   function persist() {
-    const snapshot = JSON.stringify(rows);
-    writing = writing.then(() => {
+    pending = JSON.stringify(rows);
+    if (queued) return chain;
+    queued = true;
+    chain = chain.then(() => {
+      queued = false;
+      const snapshot = pending;
+      pending = null;
+      if (snapshot == null) return;
       const tmp = `${file}.tmp`;
       fs.writeFileSync(tmp, snapshot);
       fs.renameSync(tmp, file);
+    }).catch((error) => {
+      queued = false;
+      console.error("store", error.message || error);
     });
-    return writing;
+    return chain;
   }
 
   return {
@@ -44,8 +55,10 @@ export function createStore(dir) {
       const row = rows.find((item) => item.id === id || item.gatewayId === id);
       if (!row) return null;
       Object.assign(row, patch, { updatedAt: new Date().toISOString() });
-      persist();
-      return row;
+      return persist().then(() => row);
+    },
+    save() {
+      return persist();
     },
     summary() {
       const paid = rows.filter((row) => row.status === "COMPLETED");

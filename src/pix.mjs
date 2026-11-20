@@ -293,21 +293,26 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
     return accepted;
   }
 
-  function holdRouteB(row) {
-    if (row.gateway !== "b" || !gateways) return false;
+  function routeBHold(row) {
+    if (row.gateway !== "b" || !gateways) return "";
     const policy = gateways.bWebhookPolicy();
-    if (!policy.enabled) return true;
-    if (policy.since && String(row.createdAt || "") < policy.since) {
-      row.partnerSkippedAt = row.partnerSkippedAt || new Date().toISOString();
-      store.update(row.id, row);
-      return true;
+    if (!policy.enabled) return "hold";
+    if (policy.since && String(row.createdAt || "") < policy.since) return "skip";
+    return "";
+  }
+
+  async function holdRouteB(row) {
+    const held = routeBHold(row);
+    if (held === "skip" && !row.partnerSkippedAt) {
+      row.partnerSkippedAt = new Date().toISOString();
+      await store.update(row.id, row);
     }
-    return false;
+    return held === "hold" || held === "skip";
   }
 
   async function notifyIfPaid(row) {
     if (!row || row.status !== "COMPLETED" || row.partnerNotifiedAt || row.partnerSkippedAt) return;
-    if (holdRouteB(row)) return;
+    if (await holdRouteB(row)) return;
     try {
       const ids = [...new Set([row.id, row.gatewayId, row.externalRef].filter(Boolean))];
       let accepted = false;
@@ -318,17 +323,49 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
       if (!accepted) return;
       row.notifyUrl = PARTNER_WEBHOOK_URL;
       row.partnerNotifiedAt = new Date().toISOString();
-      store.update(row.id, row);
+      await store.update(row.id, row);
     } catch (error) {
       console.error("webhook lulapay", error.message || error);
     }
   }
 
-  async function notifyOutstanding() {
-    for (const row of store.list()) {
-      const full = store.get(row.id);
-      if (full) await notifyIfPaid(full);
+  let sweeping = null;
+  let lastSweep = 0;
+  const retryAfter = new Map();
+
+  function notifyOutstanding() {
+    const now = Date.now();
+    if (sweeping) return sweeping;
+    if (now - lastSweep < 30000) return Promise.resolve();
+    lastSweep = now;
+    sweeping = sweepOutstanding().finally(() => {
+      sweeping = null;
+    });
+    return sweeping;
+  }
+
+  async function sweepOutstanding() {
+    const stamp = new Date().toISOString();
+    let skipped = false;
+    let attempts = 0;
+    for (const row of store.all()) {
+      if (row.status !== "COMPLETED" || row.partnerNotifiedAt || row.partnerSkippedAt) continue;
+      if (routeBHold(row) === "skip") {
+        row.partnerSkippedAt = stamp;
+        row.updatedAt = stamp;
+        skipped = true;
+        continue;
+      }
+      if (routeBHold(row) === "hold") continue;
+      const tried = retryAfter.get(row.id) || 0;
+      if (Date.now() - tried < 60000) continue;
+      if (attempts >= 15) continue;
+      attempts += 1;
+      retryAfter.set(row.id, Date.now());
+      await notifyIfPaid(row);
     }
+    if (retryAfter.size > 4000) retryAfter.clear();
+    if (skipped) await store.save();
   }
 
   async function resend(transactionId) {
