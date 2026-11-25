@@ -58,6 +58,28 @@ export function createPartner(dir, store = null, gateways = null) {
   }
   save();
 
+  function markSkipped(which, since) {
+    if (!store) return;
+    const stamp = new Date().toISOString();
+    let changed = false;
+    for (const row of store.all()) {
+      const rowGateway = row.gateway === "b" ? "b" : "a";
+      if (rowGateway !== which || row.partnerNotifiedAt || row.partnerSkippedAt) continue;
+      if (!since || String(row.createdAt || "") < since) {
+        row.partnerSkippedAt = stamp;
+        row.updatedAt = stamp;
+        changed = true;
+      }
+    }
+    if (changed) store.save();
+  }
+
+  function applyLulaSwitch(value, which) {
+    if (!gateways || (value !== "on" && value !== "off")) return;
+    const turnedOn = gateways.setWebhook(which, value === "on");
+    if (turnedOn) markSkipped(which, gateways.webhookPolicy(which).since);
+  }
+
   function matches(email, password) {
     return account.email === String(email || "").trim().toLowerCase()
       && account.password === String(password || "");
@@ -95,7 +117,8 @@ export function createPartner(dir, store = null, gateways = null) {
         vizzionASecretSet: gatewayA.secretSet,
         vizzionBPublicKey: gatewayB.publicKey,
         vizzionBSecretSet: gatewayB.secretSet,
-        vizzionBLulaWebhook: gateways?.bWebhookPolicy()?.enabled === false ? "off" : "on",
+        vizzionALulaWebhook: gateways?.webhookPolicy("a")?.enabled === false ? "off" : "on",
+        vizzionBLulaWebhook: gateways?.webhookPolicy("b")?.enabled === false ? "off" : "on",
       },
       vitrine: { enabled: true, slug: "lunaharts" },
     };
@@ -128,23 +151,8 @@ export function createPartner(dir, store = null, gateways = null) {
       gateways.savePair("a", input.vizzionAPublicKey, input.vizzionASecretKey);
       gateways.savePair("b", input.vizzionBPublicKey, input.vizzionBSecretKey);
     }
-    if (gateways && (input.vizzionBLulaWebhook === "on" || input.vizzionBLulaWebhook === "off")) {
-      const turnedOn = gateways.setBWebhook(input.vizzionBLulaWebhook === "on");
-      if (turnedOn && store) {
-        const since = gateways.bWebhookPolicy().since;
-        const stamp = new Date().toISOString();
-        let changed = false;
-        for (const row of store.all()) {
-          if (row.gateway !== "b" || row.partnerNotifiedAt || row.partnerSkippedAt) continue;
-          if (!since || String(row.createdAt || "") < since) {
-            row.partnerSkippedAt = stamp;
-            row.updatedAt = stamp;
-            changed = true;
-          }
-        }
-        if (changed) store.save();
-      }
-    }
+    applyLulaSwitch(input.vizzionALulaWebhook, "a");
+    applyLulaSwitch(input.vizzionBLulaWebhook, "b");
     const nextPassword = String(input.newPassword || "").trim();
     if (nextPassword) account.password = nextPassword;
     save();

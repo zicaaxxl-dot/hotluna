@@ -293,16 +293,16 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
     return accepted;
   }
 
-  function routeBHold(row) {
-    if (row.gateway !== "b" || !gateways) return "";
-    const policy = gateways.bWebhookPolicy();
+  function routeHold(row) {
+    if (!gateways || !row) return "";
+    const policy = gateways.webhookPolicy(row.gateway === "b" ? "b" : "a");
     if (!policy.enabled) return "hold";
     if (policy.since && String(row.createdAt || "") < policy.since) return "skip";
     return "";
   }
 
-  async function holdRouteB(row) {
-    const held = routeBHold(row);
+  async function holdRoute(row) {
+    const held = routeHold(row);
     if (held === "skip" && !row.partnerSkippedAt) {
       row.partnerSkippedAt = new Date().toISOString();
       await store.update(row.id, row);
@@ -312,7 +312,7 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
 
   async function notifyIfPaid(row) {
     if (!row || row.status !== "COMPLETED" || row.partnerNotifiedAt || row.partnerSkippedAt) return;
-    if (await holdRouteB(row)) return;
+    if (await holdRoute(row)) return;
     try {
       const ids = [...new Set([row.id, row.gatewayId, row.externalRef].filter(Boolean))];
       let accepted = false;
@@ -350,13 +350,13 @@ export function createPixService({ store, homeConfig, publicBaseUrl, defaultNoti
     let attempts = 0;
     for (const row of store.all()) {
       if (row.status !== "COMPLETED" || row.partnerNotifiedAt || row.partnerSkippedAt) continue;
-      if (routeBHold(row) === "skip") {
+      if (routeHold(row) === "skip") {
         row.partnerSkippedAt = stamp;
         row.updatedAt = stamp;
         skipped = true;
         continue;
       }
-      if (routeBHold(row) === "hold") continue;
+      if (routeHold(row) === "hold") continue;
       const tried = retryAfter.get(row.id) || 0;
       if (Date.now() - tried < 60000) continue;
       if (attempts >= 15) continue;

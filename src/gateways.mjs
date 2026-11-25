@@ -29,7 +29,7 @@ export function createGateways(dir) {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "gateways.json");
   let saved = empty();
-  let bWebhook = webhookState();
+  const webhooks = { a: webhookState(), b: webhookState() };
   if (fs.existsSync(file)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -39,7 +39,8 @@ export function createGateways(dir) {
           secretKey: String(parsed?.[which]?.secretKey || ""),
         };
       }
-      bWebhook = webhookState(parsed?.bWebhook);
+      webhooks.a = webhookState(parsed?.aWebhook);
+      webhooks.b = webhookState(parsed?.bWebhook);
     } catch {
       fs.renameSync(file, `${file}.broken-${Date.now()}`);
     }
@@ -47,7 +48,7 @@ export function createGateways(dir) {
 
   function persist() {
     const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ a: saved.a, b: saved.b, bWebhook }));
+    fs.writeFileSync(tmp, JSON.stringify({ a: saved.a, b: saved.b, aWebhook: webhooks.a, bWebhook: webhooks.b }));
     fs.renameSync(tmp, file);
   }
 
@@ -73,19 +74,22 @@ export function createGateways(dir) {
     return { publicKey: got.publicKey, secretSet: Boolean(got.secretKey) };
   }
 
-  function bWebhookPolicy() {
-    return { enabled: bWebhook.enabled !== false, since: bWebhook.since || "" };
+  function webhookPolicy(which) {
+    const name = which === "b" ? "b" : "a";
+    const value = webhooks[name];
+    return { enabled: value.enabled !== false, since: value.since || "" };
   }
 
-  function setBWebhook(enabled) {
+  function setWebhook(which, enabled) {
+    const name = which === "b" ? "b" : "a";
     const on = Boolean(enabled);
-    const wasOn = bWebhook.enabled !== false;
+    const wasOn = webhooks[name].enabled !== false;
     if (on === wasOn) return false;
-    bWebhook.enabled = on;
-    if (on) bWebhook.since = new Date().toISOString();
+    webhooks[name].enabled = on;
+    if (on) webhooks[name].since = new Date().toISOString();
     persist();
     return on;
   }
 
-  return { keys, savePair, publicInfo, bWebhookPolicy, setBWebhook };
+  return { keys, savePair, publicInfo, webhookPolicy, setWebhook };
 }
